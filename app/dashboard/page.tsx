@@ -78,10 +78,15 @@ export default function DashboardPage() {
   const fetchTasks = useCallback(async () => {
     try {
       const r = await fetch("/api/tasks");
+      if (r.status === 401) { router.push("/login"); return; }
       if (r.ok) setTasks(await r.json());
-    } catch { add("Failed to load tasks", "err"); }
-    finally { setLoading(false); }
-  }, [add]);
+      else add("Failed to load tasks", "err");
+    } catch {
+      add("Failed to load tasks", "err");
+    } finally {
+      setLoading(false);
+    }
+  }, [add, router]);
 
   useEffect(() => {
     setMounted(true);
@@ -89,30 +94,42 @@ export default function DashboardPage() {
     else if (status === "authenticated") fetchTasks();
   }, [status, router, fetchTasks]);
 
-  /* create */
+  /* ── CREATE TASK ── */
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
     if (!title.trim()) return;
-    setFormErr(""); setCreating(true);
+
+    setFormErr("");
+    setCreating(true);
+
     try {
       const r = await fetch("/api/tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: title.trim(), status: initStatus }),
       });
+
       const data = await r.json();
-      if (!r.ok) { setFormErr(data.error || "Failed to create"); }
-      else {
-        setTasks(p => [data, ...p]);
+
+      if (!r.ok) {
+        setFormErr(data.error || "Failed to create task");
+        add(data.error || "Failed to create task", "err");
+      } else {
+        setTasks(prev => [data, ...prev]);
         setTitle("");
+        setInitStatus("TODO");
         add("Task created ✓");
         inputRef.current?.focus();
       }
-    } catch { setFormErr("Something went wrong."); }
-    finally { setCreating(false); }
+    } catch {
+      setFormErr("Network error — please try again");
+      add("Network error", "err");
+    } finally {
+      setCreating(false);
+    }
   }
 
-  /* update status */
+  /* ── UPDATE STATUS ── */
   async function changeStatus(id: string, newStatus: Status) {
     setUpdatingId(id);
     try {
@@ -125,9 +142,15 @@ export default function DashboardPage() {
         const updated = await r.json();
         setTasks(p => p.map(t => t.id === id ? updated : t));
         add(`Moved to ${LABEL[newStatus]} ✓`);
+      } else {
+        const d = await r.json();
+        add(d.error || "Update failed", "err");
       }
-    } catch { add("Update failed", "err"); }
-    finally { setUpdatingId(null); }
+    } catch {
+      add("Update failed", "err");
+    } finally {
+      setUpdatingId(null);
+    }
   }
 
   /* derived */
@@ -168,7 +191,6 @@ export default function DashboardPage() {
   /* ── Main render ── */
   return (
     <div className="min-h-screen" style={{ background: "var(--c-bg)" }}>
-      {/* Orbs */}
       <div className="orb orb-1" /><div className="orb orb-2" /><div className="orb orb-3" />
 
       {/* ── Navbar ── */}
@@ -186,7 +208,6 @@ export default function DashboardPage() {
           </div>
 
           <div className="flex items-center gap-3">
-            {/* User chip */}
             <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl"
               style={{ background: "rgba(255,255,255,.04)", border: "1px solid var(--c-border)" }}>
               <div className="w-6 h-6 rounded-lg flex items-center justify-center text-xs font-bold text-white"
@@ -196,8 +217,7 @@ export default function DashboardPage() {
               <span className="text-sm" style={{ color: "var(--c-muted)" }}>{name}</span>
             </div>
             <button onClick={() => signOut({ callbackUrl: "/login" })}
-              className="btn btn-ghost btn-sm"
-              style={{ fontSize: ".78rem" }}>
+              className="btn btn-ghost btn-sm" style={{ fontSize: ".78rem" }}>
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                   d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
@@ -225,10 +245,10 @@ export default function DashboardPage() {
         {/* ── Stats ── */}
         <div className={`grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6 ${mounted ? "anim-in delay-1" : "opacity-0"}`}>
           {[
-            { label: "Total",       val: total,                                      color: "#818cf8" },
-            { label: "To Do",       val: grouped.TODO.length,                        color: "#94a3b8" },
-            { label: "In Progress", val: grouped.IN_PROGRESS.length,                 color: "#fbbf24" },
-            { label: "Done",        val: done,                                        color: "#34d399" },
+            { label: "Total",       val: total,                   color: "#818cf8" },
+            { label: "To Do",       val: grouped.TODO.length,     color: "#94a3b8" },
+            { label: "In Progress", val: grouped.IN_PROGRESS.length, color: "#fbbf24" },
+            { label: "Done",        val: done,                    color: "#34d399" },
           ].map(s => (
             <div key={s.label} className="stat-card">
               <p className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--c-muted)" }}>
@@ -267,22 +287,40 @@ export default function DashboardPage() {
           <form onSubmit={handleCreate}>
             <div className="flex flex-col sm:flex-row gap-3">
               <div className="flex-1">
-                <input ref={inputRef} type="text" value={title}
+                <input
+                  ref={inputRef}
+                  type="text"
+                  value={title}
                   onChange={e => { setTitle(e.target.value); setFormErr(""); }}
                   placeholder="What needs to be done? (Enter to add)"
-                  maxLength={200} className="inp" />
-                {formErr && <p className="text-xs mt-1.5" style={{ color: "#fb7185" }}>{formErr}</p>}
+                  maxLength={200}
+                  className="inp"
+                  autoComplete="off"
+                />
+                {formErr && (
+                  <p className="text-xs mt-1.5 flex items-center gap-1" style={{ color: "#fb7185" }}>
+                    <svg className="w-3 h-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                    </svg>
+                    {formErr}
+                  </p>
+                )}
               </div>
-              {/* Initial status picker */}
-              <select value={initStatus} onChange={e => setInitStatus(e.target.value as Status)}
-                className="sel" style={{ height: "42px" }}>
+              <select
+                value={initStatus}
+                onChange={e => setInitStatus(e.target.value as Status)}
+                className="sel"
+                style={{ height: "42px" }}>
                 <option value="TODO">To Do</option>
                 <option value="IN_PROGRESS">In Progress</option>
                 <option value="DONE">Done</option>
               </select>
               <button type="submit" disabled={creating || !title.trim()} className="btn btn-primary">
                 {creating
-                  ? <svg className="spin w-4 h-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+                  ? <svg className="spin w-4 h-4" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
                   : "+ Add"}
               </button>
             </div>
@@ -311,7 +349,13 @@ export default function DashboardPage() {
             <p className="font-display text-xl font-bold mb-1" style={{ color: "var(--c-text)" }}>
               Board is empty
             </p>
-            <p className="text-sm" style={{ color: "var(--c-muted)" }}>Add your first task above to get started.</p>
+            <p className="text-sm" style={{ color: "var(--c-muted)" }}>
+              Type a task above and press <strong>+ Add</strong> or <kbd
+                className="px-1.5 py-0.5 rounded text-xs"
+                style={{ background: "rgba(255,255,255,.08)", border: "1px solid var(--c-border)" }}>
+                Enter
+              </kbd>
+            </p>
           </div>
         ) : (
           <div className={`grid grid-cols-1 sm:grid-cols-3 gap-5 ${mounted ? "anim-in delay-3" : "opacity-0"}`}>
@@ -321,7 +365,8 @@ export default function DashboardPage() {
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-2">
                     <span className="pulse-ring w-2.5 h-2.5 rounded-full" style={{ color: col.dot }}>
-                      <span className="block w-2.5 h-2.5 rounded-full" style={{ background: col.dot, boxShadow: `0 0 6px ${col.dot}` }} />
+                      <span className="block w-2.5 h-2.5 rounded-full"
+                        style={{ background: col.dot, boxShadow: `0 0 6px ${col.dot}` }} />
                     </span>
                     <span className="text-sm font-semibold">{col.label}</span>
                   </div>
@@ -336,21 +381,20 @@ export default function DashboardPage() {
                   {grouped[col.key].length === 0 ? (
                     <div className="empty">
                       <svg className="w-7 h-7 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                          d="M12 4v16m8-8H4" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" />
                       </svg>
                       <span>No tasks yet</span>
                     </div>
                   ) : (
                     grouped[col.key].map((task, i) => (
-                      <div key={task.id} className={`task-card ${col.cardCls} card-appear`}
+                      <div key={task.id}
+                        className={`task-card ${col.cardCls} card-appear`}
                         style={{ animationDelay: `${i * 0.06}s` }}>
-                        {/* Title */}
+
                         <p className="text-sm font-medium leading-snug mb-3" style={{ color: "var(--c-text)" }}>
                           {task.title}
                         </p>
 
-                        {/* Badge + date */}
                         <div className="flex items-center justify-between mb-3">
                           <span className={`badge ${col.badge}`}>
                             <span className="w-1.5 h-1.5 rounded-full" style={{ background: col.dot }} />
@@ -359,10 +403,8 @@ export default function DashboardPage() {
                           <span className="text-xs" style={{ color: "var(--c-dim)" }}>{fmtDate(task.createdAt)}</span>
                         </div>
 
-                        {/* Actions */}
                         <div className="flex items-center gap-2 pt-3"
                           style={{ borderTop: "1px solid var(--c-border)" }}>
-                          {/* Quick move */}
                           <button
                             onClick={() => changeStatus(task.id, NEXT[task.status])}
                             disabled={updatingId === task.id}
@@ -374,15 +416,22 @@ export default function DashboardPage() {
                               fontSize: ".75rem",
                             }}>
                             {updatingId === task.id
-                              ? <svg className="spin w-3 h-3" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
-                              : <><svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" /></svg>{NEXT_LABEL[task.status]}</>
+                              ? <svg className="spin w-3 h-3" viewBox="0 0 24 24" fill="none">
+                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                                </svg>
+                              : <><svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                                </svg>{NEXT_LABEL[task.status]}</>
                             }
                           </button>
 
-                          {/* Status dropdown */}
-                          <select value={task.status} disabled={updatingId === task.id}
+                          <select
+                            value={task.status}
+                            disabled={updatingId === task.id}
                             onChange={e => changeStatus(task.id, e.target.value as Status)}
-                            className="sel" style={{ fontSize: ".73rem", padding: "5px 8px" }}>
+                            className="sel"
+                            style={{ fontSize: ".73rem", padding: "5px 8px" }}>
                             <option value="TODO">To Do</option>
                             <option value="IN_PROGRESS">In Progress</option>
                             <option value="DONE">Done</option>
